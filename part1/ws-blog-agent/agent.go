@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"github.com/gorilla/websocket"
+	"golang.org/x/text/encoding/charmap"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -16,21 +18,21 @@ func Run() {
 }
 
 func infiniteConnection() {
-
+	server := "ws://localhost:8080/api/agent/shell"
 	for {
-		connection, err := openWebSocketConnection("ws://localhost:8080/agent")
+		connection, err := openWebSocketConnection(server)
 		if err != nil {
+			wait()
 			continue
 		}
-		doneChannel := make(chan struct{})
 
 		if err = sendAuth(connection); err != nil {
 			fmt.Println(err)
-			closeConn(connection, doneChannel)
+			closeConn(connection)
 			continue
 		}
-
-		handleMessages(connection, doneChannel)
+		fmt.Printf("Connection to %s established\n", server)
+		handleMessages(connection)
 		wait()
 	}
 }
@@ -38,14 +40,11 @@ func infiniteConnection() {
 func wait() {
 	waitingSeconds := 30
 	waiting := time.Duration(waitingSeconds) * time.Second
-	fmt.Printf("WebSocket Session ended. Waiting %d seconds to reestablish connection.", waitingSeconds)
+	fmt.Printf("WebSocket Session ended. Waiting %d seconds to reestablish connection.\n", waitingSeconds)
 	time.Sleep(waiting)
 }
 
-func handleMessages(
-	connection *websocket.Conn,
-	channel chan struct{},
-) {
+func handleMessages(connection *websocket.Conn) {
 	workingDirectory, err := os.UserHomeDir()
 	if err != nil {
 		workingDirectory = "C:\\"
@@ -54,7 +53,7 @@ func handleMessages(
 	for {
 		messageType, bytes, err := connection.ReadMessage()
 		if err != nil {
-			fmt.Printf("Error getting WS frame: %s", err)
+			fmt.Println(err)
 			break
 		}
 		switch messageType {
@@ -63,23 +62,24 @@ func handleMessages(
 			workingDirectory = resolveWorkingDirectory(workingDirectory, command)
 			commandResult, err := executeCommand(workingDirectory, command)
 			if err != nil {
-				fmt.Printf(err.Error())
+				fmt.Println(err)
 			}
 			sendResult(connection, commandResult)
 		case websocket.CloseMessage:
-			fmt.Printf("Close frame with message: %s", string(bytes))
+			fmt.Printf("Close frame with message: %s\n", string(bytes))
 			break
 		default:
-			fmt.Printf("Not supported WS frame of type %d", messageType)
+			fmt.Printf("Not supported WS frame of type %d\n", messageType)
 			break
 		}
 	}
 }
 
 func sendResult(connection *websocket.Conn, result string) {
+	fmt.Printf("Sending command result: %s...\n", result)
 	err := connection.WriteMessage(websocket.TextMessage, []byte(result))
 	if err != nil {
-		fmt.Printf("Could not send message: %s", result[:20])
+		fmt.Printf("Could not send message: %s\n", result[:20])
 	}
 }
 
@@ -105,12 +105,17 @@ func resolveWorkingDirectory(
 }
 
 func executeCommand(workingDirectory string, command string) (string, error) {
-	fmt.Printf("Executing command: %s %s", workingDirectory, command)
+	fmt.Printf("Executing command: %s %s\n", workingDirectory, command)
 	parsedCommand := parseCommand(command)
 	cmd := exec.Command(parsedCommand[0], parsedCommand[1:]...)
 	cmd.Dir = workingDirectory
-	result, err := cmd.CombinedOutput()
-	return string(result), err
+	output, err := cmd.CombinedOutput()
+	if runtime.GOOS == "windows" {
+		decoder := charmap.CodePage850.NewDecoder()
+		output, err = decoder.Bytes(output)
+	}
+	resultStr := string(output)
+	return fmt.Sprintf("%s> %s", workingDirectory, resultStr), err
 }
 
 func parseCommand(command string) []string {
@@ -143,7 +148,7 @@ func parseCommand(command string) []string {
 				inQuotes = true
 				from = i + 1
 			}
-		} else if i + 1 == length {
+		} else if i+1 == length {
 			result = append(result, command[from:length])
 			from = i
 		}
@@ -153,12 +158,10 @@ func parseCommand(command string) []string {
 
 func closeConn(
 	connection *websocket.Conn,
-	doneChannel chan struct{},
 ) {
 	if err := connection.Close(); err != nil {
 		fmt.Println(err)
 	}
-	close(doneChannel)
 }
 
 func openWebSocketConnection(server string) (*websocket.Conn, error) {

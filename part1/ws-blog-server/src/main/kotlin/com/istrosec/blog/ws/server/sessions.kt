@@ -1,4 +1,4 @@
-package com.istrosec.bloh.ws.server
+package com.istrosec.blog.ws.server
 
 import io.ktor.http.cio.websocket.*
 import kotlinx.coroutines.isActive
@@ -10,7 +10,7 @@ data class Agent(
     val localIp: String
 )
 
-class ShellSessions {
+class ShellSessions(val name: String) {
     private val storage = ConcurrentHashMap<Agent, WebSocketSession>()
 
     suspend fun register(agent: Agent, webSocketSession: WebSocketSession) {
@@ -37,6 +37,6 @@ class ShellSessions {
     }
 }
 
-val agents = ShellSessions()
+val agents = ShellSessions("AgentWS")
 
-val clients = ShellSessions()
+val clients = ShellSessions("ClientWS")

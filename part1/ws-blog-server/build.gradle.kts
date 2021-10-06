@@ -8,9 +8,9 @@ plugins {
 }
 
 group = "com.istrosec"
-version = "0.0.1"
+version = "1.0.0"
 application {
-    mainClass.set("com.istrosec.ApplicationKt")
+    mainClass.set("com.istrosec.blog.ws.server.ApplicationKt")
 }
 
 repositories {
