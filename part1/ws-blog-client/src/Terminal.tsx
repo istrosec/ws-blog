@@ -67,7 +67,7 @@ export const Terminal: FC<TerminalProps> = (props: TerminalProps) => {
                 </ul>
             </div>
             <>
-                <TextField id="filled-basic" margin="dense" fullWidth={true} multiline={true} label={currentDir} variant="filled"
+                <TextField id="filled-basic" margin="dense" fullWidth={true} multiline={true} variant="filled"
                            value={inputtedMessage} onChange={onInputChange}
                            InputProps={{
                                endAdornment: <IconButton color="primary"

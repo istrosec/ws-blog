@@ -1,5 +1,5 @@
 package main
 
 func main() {
-	Run()
+	Run("ws://localhost:8080/api/agent/shell")
 }

